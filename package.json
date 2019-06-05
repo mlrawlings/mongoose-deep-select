@@ -11,7 +11,7 @@
     "mongoose": "^5.5.4"
   },
   "scripts": {
-    "test": "concurrently --raw --kill-others --success first \"jest --watch\" \"mongod --quiet | nay\"",
-    "test:only": "jest"
+    "test": "concurrently --raw --kill-others --success first \"TZ=Etc/UTC jest --watch\" \"mongod --quiet | nay\"",
+    "test:only": "TZ=Etc/UTC jest"
   }
 }

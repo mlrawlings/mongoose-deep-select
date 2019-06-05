@@ -10,7 +10,7 @@ exports.schemas = ({ ObjectId, Virtual }) => ({
       type: Virtual,
       select: ["birthdate"],
       get: ({ birthdate }) => {
-        const today = new Date();
+        const today = new Date(2020, 0, 1);
         let age = today.getFullYear() - birthdate.getFullYear();
         const monthDiff = today.getMonth() - birthdate.getMonth();
         if (
@@ -54,16 +54,16 @@ exports.data = oid => ({
 exports.test = async ({ Community }) => {
   const communities = await Community.find().select(["name", "admin.age"]);
   expect(communities).toMatchInlineSnapshot(`
-    Array [
-      Object {
-        "_id": "346261656538346166376139",
-        "admin": Object {
-          "_id": "333063366464323339346335",
-          "birthdate": 1993-07-27T07:00:00.000Z,
-        },
-        "name": "Potomace Place",
-      },
-    ]
-  `);
-  expect(communities[0].admin.age).toMatchInlineSnapshot(`25`);
+        Array [
+          Object {
+            "_id": "346261656538346166376139",
+            "admin": Object {
+              "_id": "333063366464323339346335",
+              "birthdate": 1993-07-27T00:00:00.000Z,
+            },
+            "name": "Potomace Place",
+          },
+        ]
+    `);
+  expect(communities[0].admin.age).toMatchInlineSnapshot(`26`);
 };

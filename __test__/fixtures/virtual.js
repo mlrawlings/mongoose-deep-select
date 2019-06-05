@@ -10,7 +10,7 @@ exports.schemas = ({ Virtual }) => ({
       type: Virtual,
       select: ["birthdate"],
       get: ({ birthdate }) => {
-        const today = new Date();
+        const today = new Date(2020, 0, 1);
         let age = today.getFullYear() - birthdate.getFullYear();
         const monthDiff = today.getMonth() - birthdate.getMonth();
         if (
@@ -41,10 +41,10 @@ exports.test = async ({ Employee }) => {
         Array [
           Object {
             "_id": "333063366464323339346335",
-            "birthdate": 1993-07-27T07:00:00.000Z,
+            "birthdate": 1993-07-27T00:00:00.000Z,
             "name": "Nicholas",
           },
         ]
     `);
-  expect(employees[0].age).toMatchInlineSnapshot(`25`);
+  expect(employees[0].age).toMatchInlineSnapshot(`26`);
 };
