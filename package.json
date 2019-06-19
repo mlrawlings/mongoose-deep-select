@@ -12,6 +12,7 @@
   },
   "scripts": {
     "test": "concurrently --raw --kill-others --success first \"TZ=Etc/UTC jest --watch\" \"mongod --quiet | nay\"",
+    "test:debug":  "concurrently --raw --kill-others --success first \"TZ=Etc/UTC node --inspect-brk node_modules/.bin/jest --runInBand\" \"mongod --quiet | nay\"",
     "test:only": "TZ=Etc/UTC jest"
   }
 }

@@ -16,6 +16,8 @@ function patchSchema(OriginalSchema, mongoose) {
   const Schema = function(def, ...rest) {
     this.base = mongoose;
     const virtualDefs = extractVirtuals(def);
+    const computedDefs = extractComputed(def);
+    const computed = Object.entries(computedDefs);
     OriginalSchema.call(this, def, ...rest);
     virtuals.set(this, virtualDefs);
     Object.entries(virtualDefs).forEach(([path, def]) => {
@@ -32,6 +34,32 @@ function patchSchema(OriginalSchema, mongoose) {
         });
       }
     });
+    if (computed.length) {
+      this.pre("save", async function() {
+        const toSelect = new Set();
+
+        computed.forEach(([, def]) => {
+          if (def.select.some(path => this.isModified(path))) {
+            def.select.filter(path => !this.isSelected(path)).forEach(path => toSelect.add(path));
+            def.modified = true;
+          }
+        });
+
+        if (toSelect.size) {
+          const additional = await this.constructor.findOne({ _id:this.id }).select(Array.from(toSelect));
+          toSelect.forEach(path => {
+            this.set(path, get(additional, path));
+            this.unmarkModified(path);
+          });
+        }
+
+        computed.forEach(([path, def]) => {
+          if (def.modified) {
+            this.set(path, def.get(this));
+          }
+        });
+      });
+    }
     this.static("getLabel", function(path) {
       const [label] = getLabel(this, path.split("."));
       return label;
@@ -78,7 +106,7 @@ function patchQuery(Query) {
       return originalSelect.apply(this, arguments);
     } else if (!hasPopulatedOrVirtual(this, select)) {
       if (Array.isArray(select)) {
-        return originalSelect.apply(this, select.join(' '));
+        return originalSelect.call(this, select.join(' '));
       } else {
         return originalSelect.apply(this, arguments);
       }
@@ -182,10 +210,10 @@ function getPopulateAndSelect(Model, tree, prefix = "") {
   let select;
   Object.keys(tree).forEach(key => {
     if (key === "*") return;
-    key = prefix + key;
-    switch(schema.pathType(key)) {
+    const path = prefix + key;
+    switch(schema.pathType(path)) {
       case "real": {
-        const match = schema.paths[key];
+        const match = schema.paths[path];
         const childTree = tree[key];
         const hasNestedSelect = Object.keys(childTree).length > 0;
         if (match.options.ref && hasNestedSelect) {
@@ -193,25 +221,25 @@ function getPopulateAndSelect(Model, tree, prefix = "") {
           const [childPopulate, childSelect] = getPopulateAndSelect(ChildModel, childTree);
           populate = populate || [];
           populate.push({
-            path: key,
+            path: path,
             populate: childPopulate,
             select: childSelect
           });
         } else {
           select = select || [];
-          select.push(key);
+          select.push(path);
         }
         break;
       }
       case "virtual": {
-        const virtual = (virtuals.get(schema) || {})[key];
+        const virtual = (virtuals.get(schema) || {})[path];
         if (virtual.ref) {
           const childTree = tree[key];
           const ChildModel = mongoose.models[virtual.ref];
           const [childPopulate, childSelect] = getPopulateAndSelect(ChildModel, childTree);
           populate = populate || [];
           populate.push({
-            path: key,
+            path: path,
             populate: childPopulate,
             select: childSelect,
             match: virtual.match
@@ -232,7 +260,7 @@ function getPopulateAndSelect(Model, tree, prefix = "") {
       }
       case "nested": {
         const nestedTree = tree[key];
-        const [nestedPopulate, nestedSelect] = getPopulateAndSelect(Model, nestedTree, `${key}.`);
+        const [nestedPopulate, nestedSelect] = getPopulateAndSelect(Model, nestedTree, `${path}.`);
         if (nestedPopulate) {
           populate = populate || [];
           populate.push(...nestedPopulate);
@@ -303,6 +331,23 @@ function extractVirtuals(def) {
     }
   });
   return virtuals;
+}
+
+function extractComputed(def) {
+  const computed = {};
+  Object.entries(def).forEach(([key, value]) => {
+    if (typeof value.get === "function" && value.select) {
+      computed[key] = { get:value.get, select:value.select };
+      delete value.get;
+      delete value.select;
+    } else if (typeof value === "object") {
+      const nestedComputed = extractComputed(value);
+      Object.entries(nestedComputed).forEach(([nestedKey, value]) => {
+        computed[key + "." + nestedKey] = value;
+      });
+    }
+  });
+  return computed;
 }
 
 function get(obj, props) {
