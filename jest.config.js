@@ -1,3 +1,5 @@
 module.exports = {
-  testEnvironment: "node"
+  testEnvironment: "node",
+  collectCoverageFrom: ["index.js"],
+  forceCoverageMatch: ["index.js"]
 };
