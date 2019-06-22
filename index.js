@@ -1,6 +1,6 @@
 const Virtual = Symbol("Virtual");
 
-const patchedQuery = new WeakSet();
+const patchedObjects = new WeakSet();
 const sortObjects = new WeakMap();
 const selectTrees = new WeakMap();
 const contexts = new WeakMap();
@@ -9,6 +9,7 @@ const virtuals = new WeakMap();
 module.exports = function patchMongoose (mongoose) {
   mongoose.Schema = patchSchema(mongoose.Schema, mongoose);
   mongoose.Query = patchQuery(mongoose.Query);
+  mongoose.Document = patchDocument(mongoose.Document);
   return mongoose;
 };
 
@@ -37,26 +38,17 @@ function patchSchema(OriginalSchema, mongoose) {
     if (computed.length) {
       this.pre("save", async function() {
         const toSelect = new Set();
-
-        computed.forEach(([, def]) => {
+        const needComputing = computed.filter(([, def]) => {
           if (def.select.some(path => this.isModified(path))) {
-            def.select.filter(path => !this.isSelected(path)).forEach(path => toSelect.add(path));
-            def.modified = true;
+            def.select.forEach(path => toSelect.add(path));
+            return true;
           }
         });
 
-        if (toSelect.size) {
-          const additional = await this.constructor.findOne({ _id:this.id }).select(Array.from(toSelect));
-          toSelect.forEach(path => {
-            this.set(path, get(additional, path));
-            this.unmarkModified(path);
-          });
-        }
+        await this.select(Array.from(toSelect));
 
-        computed.forEach(([path, def]) => {
-          if (def.modified) {
-            this.set(path, def.get(this));
-          }
+        needComputing.forEach(([path, def]) => {
+          this.set(path, def.get(this));
         });
       });
     }
@@ -72,8 +64,29 @@ function patchSchema(OriginalSchema, mongoose) {
   return Schema;
 }
 
+function patchDocument(Document) {
+  if (patchedObjects.has(Document)) return Document;
+  Document.prototype.select = async function(selectedFields) {
+    if (Array.isArray(selectedFields)) {
+      selectedFields = selectedFields.filter(path => !this.isSelected(path));
+      if (!selectedFields.length) return this;
+    } else {
+      throw new Error("document.select only supports passing an array of paths");
+    }
+
+    const additional = await this.constructor.findOne({ _id:this.id }).select(selectedFields);
+    mergeTrees(additional, this, additional.toObject());
+    selectedFields.forEach(path => {
+      this.unmarkModified(path);
+    });
+
+    return this;
+  }
+  return Document;
+}
+
 function patchQuery(Query) {
-  if (patchedQuery.has(Query)) return Query;
+  if (patchedObjects.has(Query)) return Query;
 
   const originalSort = Query.prototype.sort;
   const originalSelect = Query.prototype.select;
@@ -132,8 +145,8 @@ function patchQuery(Query) {
       const sort = sortObjects.get(this);
       if (tree) {
         const [populate, select] = getPopulateAndSelect(this.model, tree);
-        if (select) {
-          this.select(select);
+        if (select || populate) {
+          this.select(select || "_id");
         }
         if (populate) {
           this.populate(populate);
@@ -163,7 +176,7 @@ function patchQuery(Query) {
     }
   }
 
-  patchedQuery.add(Query);
+  patchedObjects.add(Query);
 
   return Query;
 }
@@ -291,10 +304,10 @@ function addPathsToTree(paths, tree) {
   return tree;
 }
 
-function mergeTrees(source, target) {
-  Object.keys(source).forEach(key => {
+function mergeTrees(source, target, keyTree = source) {
+  Object.keys(keyTree).forEach(key => {
     if (typeof source[key] === "object" && typeof target[key] === "object") {
-      mergeTrees(source[key], target[key]);
+      mergeTrees(source[key], target[key], keyTree[key]);
     } else {
       target[key] = source[key];
     }
