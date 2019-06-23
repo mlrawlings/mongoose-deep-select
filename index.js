@@ -100,7 +100,7 @@ function patchQuery(Query) {
   Query.prototype.sort = function patchedSort(sort) {
     if (!sort || typeof sort === 'string') {
       return originalSort.apply(this, arguments);
-    } else if (!hasPopulatedOrVirtual(this, sort)) {
+    } else if (!hasPopulatedOrVirtual(this, Object.keys(sort))) {
       return originalSort.apply(this, arguments);
     }
 
