@@ -36,7 +36,7 @@ function patchSchema(OriginalSchema, mongoose) {
       }
     });
     if (computed.length) {
-      this.pre("save", async function() {
+      this.pre("save", async function(next) {
         const toSelect = new Set();
         const needComputing = computed.filter(([, def]) => {
           if (def.select.some(path => this.isModified(path))) {
@@ -50,6 +50,8 @@ function patchSchema(OriginalSchema, mongoose) {
         needComputing.forEach(([path, def]) => {
           this.set(path, def.get(this));
         });
+
+        next();
       });
     }
     this.static("getLabel", function(path) {
@@ -317,20 +319,37 @@ function mergeTrees(source, target, keyTree = source) {
 
 function hasPopulatedOrVirtual(Model, keys) {
   const schema = Model.schema;
-  const paths = schema.paths;
   if (!Array.isArray(keys)) {
     keys = Object.keys(keys);
   }
   return keys.some(key => {
-    const match = paths[key.split('.')[0]];
-    return match ? !!match.options.ref : true;
+    let parts = [];
+    for (const part of key.split('.')) {
+      parts.push(part);
+      const path = parts.join(".");
+      switch(schema.pathType(path)) {
+        case "real": {
+          return !!schema.paths[path].options.ref
+        }
+        case "virtual": {
+          return true
+        }
+        case "nested": {
+          break;
+        }
+        default: {
+          console.warn(`invalid path: ${key}`);
+          return false;
+        }
+      }
+    }
   });
 }
 
 function extractVirtuals(def) {
   const virtuals = {};
   Object.entries(def).forEach(([key, value]) => {
-    if (value.type === Virtual) {
+    if (value && value.type === Virtual) {
       delete def[key];
       virtuals[key] = value;
     } else if (typeof value === "object") {
@@ -349,7 +368,7 @@ function extractVirtuals(def) {
 function extractComputed(def) {
   const computed = {};
   Object.entries(def).forEach(([key, value]) => {
-    if (typeof value.get === "function" && value.select) {
+    if (value && typeof value.get === "function" && value.select) {
       computed[key] = { get:value.get, select:value.select };
       delete value.get;
       delete value.select;
