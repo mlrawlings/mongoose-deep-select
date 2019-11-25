@@ -1,10 +1,19 @@
 const Virtual = Symbol("Virtual");
 
 const patchedObjects = new WeakSet();
+const didCustomSelect = new WeakSet();
 const sortObjects = new WeakMap();
 const selectTrees = new WeakMap();
 const contexts = new WeakMap();
 const virtuals = new WeakMap();
+const sortDirections = {
+  asc: 1,
+  dec: -1,
+  ascending: 1,
+  descending: -1,
+  1: 1,
+  "-1": -1 
+};
 
 module.exports = function patchMongoose (mongoose) {
   mongoose.Schema = patchSchema(mongoose.Schema, mongoose);
@@ -117,25 +126,31 @@ function patchQuery(Query) {
   }
 
   Query.prototype.select = function patchedSelect(select) {
-    if (!select || typeof select === 'string') {
+    if (!select) {
       return originalSelect.apply(this, arguments);
-    } else if (!hasPopulatedOrVirtual(this, select)) {
-      if (Array.isArray(select)) {
-        return originalSelect.call(this, select.join(' '));
-      } else {
-        return originalSelect.apply(this, arguments);
-      }
-    }
+    } 
 
     let tree = selectTrees.get(this);
     if (!tree) {
       selectTrees.set(this, tree = {});
     }
 
-    if (Array.isArray(select)) {
+    if (typeof select === 'string') {
+      addPathsToTree(select.split(" "), tree);
+    } else if (Array.isArray(select)) {
       addPathsToTree(select, tree);
     } else {
       mergeTrees(select, tree);
+    }
+
+    didCustomSelect.add(this);
+
+    if (typeof select === 'string' || !hasPopulatedOrVirtual(this, select)) {
+      if (Array.isArray(select)) {
+        return originalSelect.call(this, select.join(' '));
+      } else {
+        return originalSelect.apply(this, arguments);
+      }
     }
 
     return this;
@@ -145,10 +160,11 @@ function patchQuery(Query) {
     try {
       const tree = selectTrees.get(this);
       const sort = sortObjects.get(this);
+      const selected = didCustomSelect.has(this);
       if (tree) {
         const [populate, select] = getPopulateAndSelect(this.model, tree);
-        if (select || populate) {
-          this.select(select || "_id");
+        if (selected && (select || populate)) {
+          originalSelect.call(this, select || "_id");
         }
         if (populate) {
           this.populate(populate);
@@ -160,10 +176,11 @@ function patchQuery(Query) {
           for (const key in sort) {
             const aVal = get(a, key);
             const bVal = get(b, key);
+            const dir = sortDirections[sort[key]];
             if (aVal > bVal) {
-              return sort[key];
+              return dir;
             } else if (aVal < bVal) {
-              return -1 * sort[key];
+              return -1 * dir;
             }
           }
           return 0;
@@ -335,7 +352,7 @@ function hasPopulatedOrVirtual(Model, keys) {
           return true
         }
         case "nested": {
-          break;
+          continue;
         }
         default: {
           console.warn(`invalid path: ${key}`);
@@ -353,8 +370,10 @@ function extractVirtuals(def) {
       delete def[key];
       virtuals[key] = value;
     } else if (typeof value === "object") {
+      const wasEmpty = !Object.keys(value).length;
       const nestedVirtuals = extractVirtuals(value);
-      if (!Object.keys(value).length) {
+      const isEmpty = !Object.keys(value).length;
+      if (isEmpty && !wasEmpty) {
         delete def[key];
       }
       Object.entries(nestedVirtuals).forEach(([nestedKey, value]) => {
