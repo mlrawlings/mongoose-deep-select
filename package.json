@@ -4,7 +4,7 @@
     "concurrently": "^4.1.0",
     "jest": "^24.8.0",
     "md5": "^2.2.1",
-    "mongoose": "^4.11.14",
+    "mongoose": "^4.13.21",
     "nay": "^1.0.2",
     "prettier": "^1.17.1",
     "vertest": "^1.1.0"
